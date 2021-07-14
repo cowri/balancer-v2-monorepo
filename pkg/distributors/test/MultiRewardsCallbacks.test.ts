@@ -55,7 +55,7 @@ describe('Staking contract', () => {
 
       await stakingContract
         .connect(mockAssetManager)
-        .notifyRewardAmount(pool.address, rewardToken.address, rewardAmount);
+        .notifyRewardAmount(pool.address, rewardToken.address, rewardAmount, mockAssetManager.address);
       await advanceTime(10);
     });
 
