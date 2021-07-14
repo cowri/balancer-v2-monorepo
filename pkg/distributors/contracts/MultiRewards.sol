@@ -96,10 +96,7 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         address rewarder
     ) external override {
         require(
-            msg.sender == owner() ||
-                msg.sender == address(pool) ||
-                msg.sender == address(rewardsScheduler) ||
-                isAssetManager(pool, msg.sender),
+            msg.sender == owner() || msg.sender == address(pool) || isAssetManager(pool, msg.sender),
             "only accessible by governance, pool or it's asset managers"
         );
         _allowlist[pool][rewardsToken][rewarder] = true;
