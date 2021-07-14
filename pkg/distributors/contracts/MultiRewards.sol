@@ -70,6 +70,8 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
     mapping(IERC20 => uint256) private _totalSupply;
     mapping(IERC20 => mapping(address => uint256)) private _balances;
 
+    address public rewardsScheduler;
+
     /* ========== CONSTRUCTOR ========== */
 
     constructor(IVault _vault) Ownable() TemporarilyPausable(3600, 3600) {
@@ -81,6 +83,10 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         _;
     }
 
+    function setRewardsScheduler(address rs) public onlyOwner {
+        rewardsScheduler = rs;
+    }
+
     /**
      * @notice Allows a rewarder to be explicitly added to a allowlist of rewarders
      */
@@ -90,7 +96,10 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         address rewarder
     ) external override {
         require(
-            msg.sender == owner() || msg.sender == address(pool) || isAssetManager(pool, msg.sender),
+            msg.sender == owner() ||
+                msg.sender == address(pool) ||
+                msg.sender == address(rewardsScheduler) ||
+                isAssetManager(pool, msg.sender),
             "only accessible by governance, pool or it's asset managers"
         );
         _allowlist[pool][rewardsToken][rewarder] = true;
@@ -100,7 +109,7 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         IERC20 pool,
         IERC20 rewardsToken,
         address rewarder
-    ) public view returns (bool) {
+    ) public view override returns (bool) {
         return _allowlist[pool][rewardsToken][rewarder];
     }
 
@@ -393,14 +402,42 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
      * @param rewardsToken - the token to deposit into staking contract for distribution
      * @param reward - the amount of tokens to deposit
      */
+    function startScheduledReward(
+        IERC20 pool,
+        IERC20 rewardsToken,
+        uint256 reward,
+        address rewarder
+    ) external override updateReward(pool, address(0)) {
+        require(
+            rewarder == msg.sender || msg.sender == rewardsScheduler,
+            "Rewarder must be sender, or rewards scheduler"
+        );
+        _startReward(pool, rewardsToken, reward, rewarder);
+    }
+
+    /**
+     * @notice Allows a rewards distributor to deposit more tokens to be distributed as rewards
+     * @param rewardsToken - the token to deposit into staking contract for distribution
+     * @param reward - the amount of tokens to deposit
+     */
     function notifyRewardAmount(
         IERC20 pool,
         IERC20 rewardsToken,
         uint256 reward
     ) external override updateReward(pool, address(0)) {
+        _startReward(pool, rewardsToken, reward, msg.sender);
+    }
+
+    function _startReward(
+        IERC20 pool,
+        IERC20 rewardsToken,
+        uint256 reward,
+        address rewarder
+    ) internal {
         // handle the transfer of reward tokens via `safeTransferFrom` to reduce the number
         // of transactions required and ensure correctness of the reward amount
-        rewardsToken.safeTransferFrom(msg.sender, address(this), reward);
+        address funder = msg.sender == rewardsScheduler ? rewardsScheduler : rewarder;
+        rewardsToken.safeTransferFrom(funder, address(this), reward);
 
         IVault.UserBalanceOp[] memory ops = new IVault.UserBalanceOp[](1);
 
@@ -414,23 +451,23 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
 
         vault.manageUserBalance(ops);
 
-        if (block.timestamp >= rewardData[pool][msg.sender][rewardsToken].periodFinish) {
-            rewardData[pool][msg.sender][rewardsToken].rewardRate = Math.divDown(
+        if (block.timestamp >= rewardData[pool][rewarder][rewardsToken].periodFinish) {
+            rewardData[pool][rewarder][rewardsToken].rewardRate = Math.divDown(
                 reward,
-                rewardData[pool][msg.sender][rewardsToken].rewardsDuration
+                rewardData[pool][rewarder][rewardsToken].rewardsDuration
             );
         } else {
-            uint256 remaining = rewardData[pool][msg.sender][rewardsToken].periodFinish.sub(block.timestamp);
-            uint256 leftover = remaining.mulDown(rewardData[pool][msg.sender][rewardsToken].rewardRate);
-            rewardData[pool][msg.sender][rewardsToken].rewardRate = Math.divDown(
+            uint256 remaining = rewardData[pool][rewarder][rewardsToken].periodFinish.sub(block.timestamp);
+            uint256 leftover = remaining.mulDown(rewardData[pool][rewarder][rewardsToken].rewardRate);
+            rewardData[pool][rewarder][rewardsToken].rewardRate = Math.divDown(
                 reward.add(leftover),
-                rewardData[pool][msg.sender][rewardsToken].rewardsDuration
+                rewardData[pool][rewarder][rewardsToken].rewardsDuration
             );
         }
 
-        rewardData[pool][msg.sender][rewardsToken].lastUpdateTime = block.timestamp;
-        rewardData[pool][msg.sender][rewardsToken].periodFinish = block.timestamp.add(
-            rewardData[pool][msg.sender][rewardsToken].rewardsDuration
+        rewardData[pool][rewarder][rewardsToken].lastUpdateTime = block.timestamp;
+        rewardData[pool][rewarder][rewardsToken].periodFinish = block.timestamp.add(
+            rewardData[pool][rewarder][rewardsToken].rewardsDuration
         );
         emit RewardAdded(address(rewardsToken), reward);
     }
