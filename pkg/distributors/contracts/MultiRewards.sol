@@ -29,6 +29,8 @@ import "@balancer-labs/v2-vault/contracts/interfaces/IVault.sol";
 import "@balancer-labs/v2-vault/contracts/interfaces/IAsset.sol";
 import "@balancer-labs/v2-vault/contracts/interfaces/IBasePool.sol";
 
+import "./RewardsScheduler.sol";
+
 import "./interfaces/IMultiRewards.sol";
 import "./interfaces/IDistributor.sol";
 
@@ -70,21 +72,18 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
     mapping(IERC20 => uint256) private _totalSupply;
     mapping(IERC20 => mapping(address => uint256)) private _balances;
 
-    address public rewardsScheduler;
+    RewardsScheduler public immutable rewardsScheduler;
 
     /* ========== CONSTRUCTOR ========== */
 
     constructor(IVault _vault) Ownable() TemporarilyPausable(3600, 3600) {
         vault = _vault;
+        rewardsScheduler = new RewardsScheduler();
     }
 
     modifier onlyAllowlistedRewarder(IERC20 pool, IERC20 rewardsToken) {
         require(isAllowlistedRewarder(pool, rewardsToken, msg.sender), "only accessible by allowlisted rewarders");
         _;
-    }
-
-    function setRewardsScheduler(address rs) public onlyOwner {
-        rewardsScheduler = rs;
     }
 
     /**
@@ -407,14 +406,13 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         address rewarder
     ) external override updateReward(pool, address(0)) {
         require(
-            rewarder == msg.sender || msg.sender == rewardsScheduler,
+            rewarder == msg.sender || msg.sender == address(rewardsScheduler),
             "Rewarder must be sender, or rewards scheduler"
         );
 
         // handle the transfer of reward tokens via `safeTransferFrom` to reduce the number
         // of transactions required and ensure correctness of the reward amount
-        address funder = (msg.sender == rewardsScheduler) ? rewardsScheduler : msg.sender;
-        rewardsToken.safeTransferFrom(funder, address(this), reward);
+        rewardsToken.safeTransferFrom(msg.sender, address(this), reward);
 
         IVault.UserBalanceOp[] memory ops = new IVault.UserBalanceOp[](1);
 
