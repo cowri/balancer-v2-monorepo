@@ -26,6 +26,7 @@ contract Reinvestor is PoolTokenManipulator {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     constructor(IVault _vault) PoolTokenManipulator(_vault) {}
+    // solhint-disable-previous-line no-empty-blocks
 
     function _initializeArrays(bytes32 poolId, IERC20[] calldata tokens)
         internal
