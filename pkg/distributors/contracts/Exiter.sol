@@ -22,8 +22,9 @@ import "@balancer-labs/v2-pool-weighted/contracts/BaseWeightedPool.sol";
 import "./PoolTokenManipulator.sol";
 
 contract Exiter is PoolTokenManipulator {
-    constructor(IVault _vault) PoolTokenManipulator(_vault) {}
-    // solhint-disable-previous-line no-empty-blocks
+    constructor(IVault _vault) PoolTokenManipulator(_vault) {
+        // solhint-disable-previous-line no-empty-blocks
+    }
 
     /**
      * @notice Exits specified pool with all bpt
