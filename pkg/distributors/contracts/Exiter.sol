@@ -58,8 +58,6 @@ contract Exiter is PoolTokenManipulator {
     ) internal {
         IAsset[] memory assets = _getAssets(poolId);
         uint256[] memory minAmountsOut = new uint256[](assets.length);
-        minAmountsOut[0] = 1;
-        minAmountsOut[1] = 1;
 
         uint256 bptAmountIn = pool.balanceOf(address(this));
 
