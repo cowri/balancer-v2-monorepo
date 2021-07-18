@@ -69,7 +69,9 @@ describe('Staking contract', () => {
       .allowlistRewarder(pool.address, rewardToken.address, mockAssetManager.address);
 
     await expect(
-      stakingContract.connect(mockAssetManager).notifyRewardAmount(pool.address, rewardToken.address, fp(100))
+      stakingContract
+        .connect(mockAssetManager)
+        .notifyRewardAmount(pool.address, rewardToken.address, fp(100), mockAssetManager.address)
     ).to.be.revertedWith('Reward must be configured with addReward');
   });
 
