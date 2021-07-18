@@ -410,6 +410,7 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
             rewarder == msg.sender || msg.sender == address(rewardsScheduler),
             "Rewarder must be sender, or rewards scheduler"
         );
+        require(_rewarders[pool][rewardsToken].contains(rewarder), "Reward must be configured with addReward");
 
         // handle the transfer of reward tokens via `safeTransferFrom` to reduce the number
         // of transactions required and ensure correctness of the reward amount
