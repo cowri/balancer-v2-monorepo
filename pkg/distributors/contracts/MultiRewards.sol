@@ -17,6 +17,7 @@ pragma experimental ABIEncoderV2;
 
 import "@balancer-labs/v2-solidity-utils/contracts/math/Math.sol";
 import "@balancer-labs/v2-solidity-utils/contracts/math/FixedPoint.sol";
+import "@balancer-labs/v2-solidity-utils/contracts/openzeppelin/Address.sol";
 import "@balancer-labs/v2-solidity-utils/contracts/openzeppelin/Ownable.sol";
 import "@balancer-labs/v2-solidity-utils/contracts/openzeppelin/ReentrancyGuard.sol";
 import "@balancer-labs/v2-solidity-utils/contracts/openzeppelin/EnumerableSet.sol";
@@ -373,12 +374,10 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         IERC20[] calldata pools,
         address callbackContract,
         bytes calldata callbackData
-    ) public nonReentrant {
+    ) public nonReentrant returns (bytes memory) {
         _getReward(pools, payable(callbackContract), true);
 
-        (bool success, ) = callbackContract.call(callbackData);
-        // solhint-disable-previous-line avoid-low-level-calls
-        require(success, "callback failed");
+        return Address.functionCall(callbackContract, callbackData);
     }
 
     /**
@@ -400,15 +399,12 @@ contract MultiRewards is IMultiRewards, IDistributor, ReentrancyGuard, Temporari
         IERC20[] calldata pools,
         address callbackContract,
         bytes calldata callbackData
-    ) public {
+    ) public returns (bytes memory) {
         for (uint256 p; p < pools.length; p++) {
             IERC20 pool = pools[p];
             unstake(pool, _balances[pool][msg.sender], callbackContract);
         }
-
-        (bool success, ) = callbackContract.call(callbackData);
-        // solhint-disable-previous-line avoid-low-level-calls
-        require(success, "callback failed");
+        return Address.functionCall(callbackContract, callbackData);
 
         getReward(pools);
     }
