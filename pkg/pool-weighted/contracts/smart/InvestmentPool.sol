@@ -66,7 +66,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     uint256 private constant _MAX_RATIO_OFFSET = 208;
     uint256 private constant _MIN_RATIO_OFFSET = 216;
     uint256 private constant _DECIMAL_DIFF_OFFSET = 224;
- 
+
     uint256 private constant _MIN_CIRCUIT_BREAKER_RATIO = 0.1e18;
     uint256 private constant _MAX_CIRCUIT_BREAKER_RATIO = 10e18;
 
@@ -203,7 +203,12 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     /**
      * @dev Update the circuit breaker ratios
      */
-    function setCircuitBreakerRatio(uint256[] memory minRatios, uint256[] memory maxRatios) external authenticate whenNotPaused nonReentrant {
+    function setCircuitBreakerRatio(uint256[] memory minRatios, uint256[] memory maxRatios)
+        external
+        authenticate
+        whenNotPaused
+        nonReentrant
+    {
         InputHelpers.ensureInputLengthMatch(_getTotalTokens(), minRatios.length, maxRatios.length);
 
         uint256 supply = totalSupply();
@@ -216,7 +221,12 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
             // Or do you have to set it on every token?
             if (minRatios[i] != 0 || maxRatios[i] != 0) {
                 // priceOfTokenInBpt = totalSupply / (token.balance / token.weight)
-                _setCircuitBreakerRatio(tokens[i], supply.divUp(balances[i].divDown(normalizedWeights[i])), minRatios[i], maxRatios[i]);
+                _setCircuitBreakerRatio(
+                    tokens[i],
+                    supply.divUp(balances[i].divDown(normalizedWeights[i])),
+                    minRatios[i],
+                    maxRatios[i]
+                );
             }
         }
     }
@@ -361,7 +371,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         // that it doesn't trip that token's breaker
         tokenOutAmount = super._onSwapGivenIn(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
 
-       // Lower Bound check means BptPrice must be <= startPrice/MinRatio
+        // Lower Bound check means BptPrice must be <= startPrice/MinRatio
         _checkCircuitBreakerLowerBound(
             _tokenState[swapRequest.tokenOut],
             currentBalanceTokenOut.sub(tokenOutAmount),
@@ -387,7 +397,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
 
         amountIn = super._onSwapGivenOut(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
 
-       // Lower Bound check means BptPrice must be <= startPrice/MinRatio
+        // Lower Bound check means BptPrice must be <= startPrice/MinRatio
         _checkCircuitBreakerLowerBound(
             _tokenState[swapRequest.tokenIn],
             currentBalanceTokenIn.sub(amountIn),
@@ -396,7 +406,11 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     }
 
     // If the ratio is 0, there is no breaker in this direction on this token
-    function _checkCircuitBreakerUpperBound(bytes32 tokenData, uint256 endingBalance, IERC20 token) private view {
+    function _checkCircuitBreakerUpperBound(
+        bytes32 tokenData,
+        uint256 endingBalance,
+        IERC20 token
+    ) private view {
         uint256 maxRatio = _decodeRatio(tokenData.decodeUint8(_MAX_RATIO_OFFSET).uncompress8());
 
         if (maxRatio != 0) {
@@ -407,13 +421,17 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
             // Can be front run!
             // Once turned on, all need to have values
             // BPT price can be manipulated - but lower bound protects against most of it
-            // can snapshot 
+            // can snapshot
             uint256 finalPrice = totalSupply().divDown(endingBalance.divUp(_getNormalizedWeight(token)));
-            _require(finalPrice >= lowerBound, Errors.CIRCUIT_BREAKER_TRIPPED_MAX_RATIO);    
+            _require(finalPrice >= lowerBound, Errors.CIRCUIT_BREAKER_TRIPPED_MAX_RATIO);
         }
     }
 
-    function _checkCircuitBreakerLowerBound(bytes32 tokenData, uint256 endingBalance, IERC20 token) private view {
+    function _checkCircuitBreakerLowerBound(
+        bytes32 tokenData,
+        uint256 endingBalance,
+        IERC20 token
+    ) private view {
         uint256 minRatio = _decodeRatio(tokenData.decodeUint8(_MIN_RATIO_OFFSET).uncompress8());
 
         // If the ratio is 0, there is no breaker in this direction on this token
@@ -423,7 +441,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
 
             // Validate that token price is within bounds
             uint256 finalPrice = totalSupply().divUp(endingBalance.divDown(_getNormalizedWeight(token)));
-            _require(finalPrice <= upperBound, Errors.CIRCUIT_BREAKER_TRIPPED_MIN_RATIO);     
+            _require(finalPrice <= upperBound, Errors.CIRCUIT_BREAKER_TRIPPED_MIN_RATIO);
         }
     }
 
@@ -475,11 +493,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
             // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
             IERC20 token = tokens[i];
 
-            _checkCircuitBreakerUpperBound(
-                _tokenState[token],
-                balances[i].add(amountsIn[i]),
-                token
-            );
+            _checkCircuitBreakerUpperBound(_tokenState[token], balances[i].add(amountsIn[i]), token);
         }
     }
 
@@ -523,11 +537,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
                 // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
                 IERC20 token = tokens[i];
 
-                _checkCircuitBreakerLowerBound(
-                    _tokenState[token],
-                    balances[i].sub(amountsOut[i]),
-                    token
-                );
+                _checkCircuitBreakerLowerBound(_tokenState[token], balances[i].sub(amountsOut[i]), token);
             }
         }
     }
@@ -575,13 +585,18 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         }
     }
 
-    function _setCircuitBreakerRatio(IERC20 token, uint256 initialPrice, uint256 minRatio, uint256 maxRatio) internal {
+    function _setCircuitBreakerRatio(
+        IERC20 token,
+        uint256 initialPrice,
+        uint256 minRatio,
+        uint256 maxRatio
+    ) internal {
         _require(minRatio == 0 || minRatio >= _MIN_CIRCUIT_BREAKER_RATIO, Errors.MIN_CIRCUIT_BREAKER_RATIO);
         _require(maxRatio == 0 || maxRatio <= _MAX_CIRCUIT_BREAKER_RATIO, Errors.MAX_CIRCUIT_BREAKER_RATIO);
         _require(maxRatio >= minRatio, Errors.INVALID_CIRCUIT_BREAKER_RATIOS);
- 
+
         bytes32 tokenData = _tokenState[token];
-    
+
         _tokenState[token] = tokenData
             .insertUint112(initialPrice, _INITIAL_BPT_PRICE_OFFSET)
             .insertUint8(_encodeRatio(minRatio).compress8(), _MIN_RATIO_OFFSET)
@@ -593,12 +608,18 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     // Encoded value = (value - MIN)/range
     // e.g., if range is 0.1 - 10, 1.5 = (1.5 - 0.1)/9.9 = 0.1414
     function _encodeRatio(uint256 ratio) private pure returns (uint256) {
-        return ratio == 0 ? 0 : (ratio - _MIN_CIRCUIT_BREAKER_RATIO) / (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
+        return
+            ratio == 0
+                ? 0
+                : (ratio - _MIN_CIRCUIT_BREAKER_RATIO) / (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
     }
 
     // Scale back to a numeric ratio
     // 0.1 + 0.1414 * 9.9 ~ 1.5
     function _decodeRatio(uint256 ratio) private pure returns (uint256) {
-        return ratio == 0 ? 0 : _MIN_CIRCUIT_BREAKER_RATIO + ratio * (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
+        return
+            ratio == 0
+                ? 0
+                : _MIN_CIRCUIT_BREAKER_RATIO + ratio * (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
     }
 }
