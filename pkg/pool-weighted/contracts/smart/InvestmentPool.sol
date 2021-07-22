@@ -19,6 +19,7 @@ import "@balancer-labs/v2-solidity-utils/contracts/openzeppelin/ReentrancyGuard.
 import "@balancer-labs/v2-solidity-utils/contracts/helpers/WordCodec.sol";
 
 import "../BaseWeightedPool.sol";
+import "../WeightedPoolUserDataHelpers.sol";
 import "./WeightCompression.sol";
 
 /**
@@ -31,6 +32,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     using FixedPoint for uint256;
     using WordCodec for bytes32;
     using WeightCompression for uint256;
+    using WeightedPoolUserDataHelpers for bytes;
 
     // State variables
 
@@ -53,14 +55,20 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     // into a fixed array of bytes32 or something like that, especially
     // since tokens can be added/removed - and re-ordered in the process
     // For each token, we store:
-    // [ 155 bits|   5 bits |  32 bits   |   64 bits    |
-    // [ unused  | decimals | end weight | start weight |
-    // |MSB                                          LSB|
+    // [ 27 bits |  5 bits  | 8 bits | 8 bits | 112 bits  |  32 bits   |   64 bits    |
+    // [ unused  | decimals | min R  | max R  | ref Price | end weight | start weight |
+    // |MSB                                                                        LSB|
     mapping(IERC20 => bytes32) private _tokenState;
 
     uint256 private constant _START_WEIGHT_OFFSET = 0;
     uint256 private constant _END_WEIGHT_OFFSET = 64;
-    uint256 private constant _DECIMAL_DIFF_OFFSET = 96;
+    uint256 private constant _INITIAL_BPT_PRICE_OFFSET = 96;
+    uint256 private constant _MAX_RATIO_OFFSET = 208;
+    uint256 private constant _MIN_RATIO_OFFSET = 216;
+    uint256 private constant _DECIMAL_DIFF_OFFSET = 224;
+ 
+    uint256 private constant _MIN_CIRCUIT_BREAKER_RATIO = 0.1e18;
+    uint256 private constant _MAX_CIRCUIT_BREAKER_RATIO = 10e18;
 
     // Event declarations
 
@@ -71,6 +79,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         uint256[] startWeights,
         uint256[] endWeights
     );
+    event CircuitBreakerRatioSet(address indexed token, uint256 minRatio, uint256 maxRatio);
 
     constructor(
         IVault vault,
@@ -191,6 +200,27 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         _startGradualWeightChange(startTime, endTime, _getNormalizedWeights(), endWeights, tokens);
     }
 
+    /**
+     * @dev Update the circuit breaker ratios
+     */
+    function setCircuitBreakerRatio(uint256[] memory minRatios, uint256[] memory maxRatios) external authenticate whenNotPaused nonReentrant {
+        InputHelpers.ensureInputLengthMatch(_getTotalTokens(), minRatios.length, maxRatios.length);
+
+        uint256 supply = totalSupply();
+
+        (IERC20[] memory tokens, uint256[] memory balances, ) = getVault().getPoolTokens(getPoolId());
+        uint256[] memory normalizedWeights = _getNormalizedWeights();
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            // Can we remove? - if so, pass through 0s? - maybe leave it and document that we can't remove it.
+            // Or do you have to set it on every token?
+            if (minRatios[i] != 0 || maxRatios[i] != 0) {
+                // priceOfTokenInBpt = totalSupply / (token.balance / token.weight)
+                _setCircuitBreakerRatio(tokens[i], supply.divUp(balances[i].divDown(normalizedWeights[i])), minRatios[i], maxRatios[i]);
+            }
+        }
+    }
+
     function _scalingFactor(IERC20 token) internal view virtual override returns (uint256) {
         bytes32 tokenData = _tokenState[token];
 
@@ -303,7 +333,7 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         emit GradualWeightUpdateScheduled(startTime, endTime, startWeights, endWeights);
     }
 
-    function _computeScalingFactor(bytes32 tokenState) private view returns (uint256) {
+    function _computeScalingFactor(bytes32 tokenState) private pure returns (uint256) {
         uint256 decimalsDifference = tokenState.decodeUint5(_DECIMAL_DIFF_OFFSET);
 
         return FixedPoint.ONE * 10**decimalsDifference;
@@ -315,20 +345,86 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         SwapRequest memory swapRequest,
         uint256 currentBalanceTokenIn,
         uint256 currentBalanceTokenOut
-    ) internal view override returns (uint256) {
+    ) internal view override returns (uint256 tokenOutAmount) {
         _require(getSwapEnabled(), Errors.SWAPS_DISABLED);
 
-        return super._onSwapGivenIn(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
+        // Check that the final amount in (= currentBalance + swap amount) doesn't trip the breaker
+        // Higher balance = lower BPT price
+        // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
+        _checkCircuitBreakerUpperBound(
+            _tokenState[swapRequest.tokenIn],
+            currentBalanceTokenIn.add(swapRequest.amount),
+            swapRequest.tokenIn
+        );
+
+        // Since amountIn is valid, calculate the amount out (price quote), and check
+        // that it doesn't trip that token's breaker
+        tokenOutAmount = super._onSwapGivenIn(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
+
+       // Lower Bound check means BptPrice must be <= startPrice/MinRatio
+        _checkCircuitBreakerLowerBound(
+            _tokenState[swapRequest.tokenOut],
+            currentBalanceTokenOut.sub(tokenOutAmount),
+            swapRequest.tokenOut
+        );
     }
 
     function _onSwapGivenOut(
         SwapRequest memory swapRequest,
         uint256 currentBalanceTokenIn,
         uint256 currentBalanceTokenOut
-    ) internal view override returns (uint256) {
+    ) internal view override returns (uint256 amountIn) {
         _require(getSwapEnabled(), Errors.SWAPS_DISABLED);
 
-        return super._onSwapGivenOut(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
+        // Check that the final amount in (= currentBalance + swap amount) doesn't trip the breaker
+        // Higher balance = lower BPT price
+        // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
+        _checkCircuitBreakerUpperBound(
+            _tokenState[swapRequest.tokenOut],
+            currentBalanceTokenOut.add(swapRequest.amount),
+            swapRequest.tokenOut
+        );
+
+        amountIn = super._onSwapGivenOut(swapRequest, currentBalanceTokenIn, currentBalanceTokenOut);
+
+       // Lower Bound check means BptPrice must be <= startPrice/MinRatio
+        _checkCircuitBreakerLowerBound(
+            _tokenState[swapRequest.tokenIn],
+            currentBalanceTokenIn.sub(amountIn),
+            swapRequest.tokenIn
+        );
+    }
+
+    // If the ratio is 0, there is no breaker in this direction on this token
+    function _checkCircuitBreakerUpperBound(bytes32 tokenData, uint256 endingBalance, IERC20 token) private view {
+        uint256 maxRatio = _decodeRatio(tokenData.decodeUint8(_MAX_RATIO_OFFSET).uncompress8());
+
+        if (maxRatio != 0) {
+            uint256 initialPrice = tokenData.decodeUint112(_INITIAL_BPT_PRICE_OFFSET);
+            uint256 lowerBound = initialPrice.divUp(maxRatio);
+
+            // Validate that token price is within bounds
+            // Can be front run!
+            // Once turned on, all need to have values
+            // BPT price can be manipulated - but lower bound protects against most of it
+            // can snapshot 
+            uint256 finalPrice = totalSupply().divDown(endingBalance.divUp(_getNormalizedWeight(token)));
+            _require(finalPrice >= lowerBound, Errors.CIRCUIT_BREAKER_TRIPPED_MAX_RATIO);    
+        }
+    }
+
+    function _checkCircuitBreakerLowerBound(bytes32 tokenData, uint256 endingBalance, IERC20 token) private view {
+        uint256 minRatio = _decodeRatio(tokenData.decodeUint8(_MIN_RATIO_OFFSET).uncompress8());
+
+        // If the ratio is 0, there is no breaker in this direction on this token
+        if (minRatio != 0) {
+            uint256 initialPrice = tokenData.decodeUint112(_INITIAL_BPT_PRICE_OFFSET);
+            uint256 upperBound = initialPrice.divDown(minRatio);
+
+            // Validate that token price is within bounds
+            uint256 finalPrice = totalSupply().divUp(endingBalance.divDown(_getNormalizedWeight(token)));
+            _require(finalPrice <= upperBound, Errors.CIRCUIT_BREAKER_TRIPPED_MIN_RATIO);     
+        }
     }
 
     /**
@@ -338,7 +434,102 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         return
             (actionId == getActionId(InvestmentPool.setSwapEnabled.selector)) ||
             (actionId == getActionId(InvestmentPool.updateWeightsGradually.selector)) ||
+            (actionId == getActionId(InvestmentPool.setCircuitBreakerRatio.selector)) ||
             super._isOwnerOnlyAction(actionId);
+    }
+
+    function _onJoinPool(
+        bytes32 poolId,
+        address sender,
+        address recipient,
+        uint256[] memory balances,
+        uint256 lastChangeBlock,
+        uint256 protocolSwapFeePercentage,
+        uint256[] memory scalingFactors,
+        bytes memory userData
+    )
+        internal
+        override
+        returns (
+            uint256 bptAmountOut,
+            uint256[] memory amountsIn,
+            uint256[] memory dueProtocolFeeAmounts
+        )
+    {
+        (bptAmountOut, amountsIn, dueProtocolFeeAmounts) = super._onJoinPool(
+            poolId,
+            sender,
+            recipient,
+            balances,
+            lastChangeBlock,
+            protocolSwapFeePercentage,
+            scalingFactors,
+            userData
+        );
+
+        (IERC20[] memory tokens, , ) = getVault().getPoolTokens(getPoolId());
+
+        for (uint256 i = 0; i < _getTotalTokens(); i++) {
+            // Check that the final amount in (= currentBalance + swap amount) doesn't trip the breaker
+            // Higher balance = lower BPT price
+            // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
+            IERC20 token = tokens[i];
+
+            _checkCircuitBreakerUpperBound(
+                _tokenState[token],
+                balances[i].add(amountsIn[i]),
+                token
+            );
+        }
+    }
+
+    function _onExitPool(
+        bytes32 poolId,
+        address sender,
+        address recipient,
+        uint256[] memory balances,
+        uint256 lastChangeBlock,
+        uint256 protocolSwapFeePercentage,
+        uint256[] memory scalingFactors,
+        bytes memory userData
+    )
+        internal
+        virtual
+        override
+        returns (
+            uint256 bptAmountIn,
+            uint256[] memory amountsOut,
+            uint256[] memory dueProtocolFeeAmounts
+        )
+    {
+        (bptAmountIn, amountsOut, dueProtocolFeeAmounts) = super._onExitPool(
+            poolId,
+            sender,
+            recipient,
+            balances,
+            lastChangeBlock,
+            protocolSwapFeePercentage,
+            scalingFactors,
+            userData
+        );
+
+        // If exit is non-proportional, it has swaps; check circuit breaker bounds
+        if (userData.exitKind() != ExitKind.EXACT_BPT_IN_FOR_TOKENS_OUT) {
+            (IERC20[] memory tokens, , ) = getVault().getPoolTokens(getPoolId());
+
+            for (uint256 i = 0; i < _getTotalTokens(); i++) {
+                // Check that the final amount in (= currentBalance + swap amount) doesn't trip the breaker
+                // Higher balance = lower BPT price
+                // Upper Bound check means BptPrice must be >= startPrice/MaxRatio
+                IERC20 token = tokens[i];
+
+                _checkCircuitBreakerLowerBound(
+                    _tokenState[token],
+                    balances[i].sub(amountsOut[i]),
+                    token
+                );
+            }
+        }
     }
 
     // Private functions
@@ -382,5 +573,32 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
             uint256 weightDelta = pctProgress.mulDown(endWeight - startWeight);
             return startWeight.add(weightDelta);
         }
+    }
+
+    function _setCircuitBreakerRatio(IERC20 token, uint256 initialPrice, uint256 minRatio, uint256 maxRatio) internal {
+        _require(minRatio == 0 || minRatio >= _MIN_CIRCUIT_BREAKER_RATIO, Errors.MIN_CIRCUIT_BREAKER_RATIO);
+        _require(maxRatio == 0 || maxRatio <= _MAX_CIRCUIT_BREAKER_RATIO, Errors.MAX_CIRCUIT_BREAKER_RATIO);
+        _require(maxRatio >= minRatio, Errors.INVALID_CIRCUIT_BREAKER_RATIOS);
+ 
+        bytes32 tokenData = _tokenState[token];
+    
+        _tokenState[token] = tokenData
+            .insertUint112(initialPrice, _INITIAL_BPT_PRICE_OFFSET)
+            .insertUint8(_encodeRatio(minRatio).compress8(), _MIN_RATIO_OFFSET)
+            .insertUint8(_encodeRatio(maxRatio).compress8(), _MAX_RATIO_OFFSET);
+
+        emit CircuitBreakerRatioSet(address(token), minRatio, maxRatio);
+    }
+
+    // Encoded value = (value - MIN)/range
+    // e.g., if range is 0.1 - 10, 1.5 = (1.5 - 0.1)/9.9 = 0.1414
+    function _encodeRatio(uint256 ratio) private pure returns (uint256) {
+        return (ratio - _MIN_CIRCUIT_BREAKER_RATIO) / (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
+    }
+
+    // Scale back to a numeric ratio
+    // 0.1 + 0.1414 * 9.9 ~ 1.5
+    function _decodeRatio(uint256 ratio) private pure returns (uint256) {
+        return _MIN_CIRCUIT_BREAKER_RATIO + ratio * (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
     }
 }

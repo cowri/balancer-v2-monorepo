@@ -22,23 +22,40 @@ import "@balancer-labs/v2-solidity-utils/contracts/math/FixedPoint.sol";
  * so heavier compression (fewer bits) results in fewer decimals.
  */
 library WeightCompression {
+    uint256 private constant _UINT8_MAX = 2**(8) - 1;
+    uint256 private constant _UINT16_MAX = 2**(16) - 1;
     uint256 private constant _UINT31_MAX = 2**(31) - 1;
     uint256 private constant _UINT32_MAX = 2**(32) - 1;
+    uint256 private constant _UINT64_MAX = 2**(64) - 1;
 
     using FixedPoint for uint256;
+
+    /**
+     * @dev Convert a 8-bit value to full FixedPoint
+     */
+    function uncompress8(uint256 value) internal pure returns (uint256) {
+        return value.mulUp(FixedPoint.ONE).divUp(_UINT8_MAX);
+    }
+
+    /**
+     * @dev Compress a FixedPoint value to 8 bits
+     */
+    function compress8(uint256 value) internal pure returns (uint256) {
+        return value.mulUp(_UINT8_MAX).divUp(FixedPoint.ONE);
+    }
 
     /**
      * @dev Convert a 16-bit value to full FixedPoint
      */
     function uncompress16(uint256 value) internal pure returns (uint256) {
-        return value.mulUp(FixedPoint.ONE).divUp(type(uint16).max);
+        return value.mulUp(FixedPoint.ONE).divUp(_UINT16_MAX);
     }
 
     /**
      * @dev Compress a FixedPoint value to 16 bits
      */
     function compress16(uint256 value) internal pure returns (uint256) {
-        return value.mulUp(type(uint16).max).divUp(FixedPoint.ONE);
+        return value.mulUp(_UINT16_MAX).divUp(FixedPoint.ONE);
     }
 
     /**
@@ -73,13 +90,13 @@ library WeightCompression {
      * @dev Convert a 64-bit value to full FixedPoint
      */
     function uncompress64(uint256 value) internal pure returns (uint256) {
-        return value.mulUp(FixedPoint.ONE).divUp(type(uint64).max);
+        return value.mulUp(FixedPoint.ONE).divUp(_UINT64_MAX);
     }
 
     /**
      * @dev Compress a FixedPoint value to 64 bits
      */
     function compress64(uint256 value) internal pure returns (uint256) {
-        return value.mulUp(type(uint64).max).divUp(FixedPoint.ONE);
+        return value.mulUp(_UINT64_MAX).divUp(FixedPoint.ONE);
     }
 }
