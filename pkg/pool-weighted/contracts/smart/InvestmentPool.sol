@@ -593,12 +593,12 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
     // Encoded value = (value - MIN)/range
     // e.g., if range is 0.1 - 10, 1.5 = (1.5 - 0.1)/9.9 = 0.1414
     function _encodeRatio(uint256 ratio) private pure returns (uint256) {
-        return (ratio - _MIN_CIRCUIT_BREAKER_RATIO) / (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
+        return ratio == 0 ? 0 : (ratio - _MIN_CIRCUIT_BREAKER_RATIO) / (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
     }
 
     // Scale back to a numeric ratio
     // 0.1 + 0.1414 * 9.9 ~ 1.5
     function _decodeRatio(uint256 ratio) private pure returns (uint256) {
-        return _MIN_CIRCUIT_BREAKER_RATIO + ratio * (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
+        return ratio == 0 ? 0 : _MIN_CIRCUIT_BREAKER_RATIO + ratio * (_MAX_CIRCUIT_BREAKER_RATIO - _MIN_CIRCUIT_BREAKER_RATIO);
     }
 }
