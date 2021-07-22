@@ -591,7 +591,8 @@ contract InvestmentPool is BaseWeightedPool, ReentrancyGuard {
         uint256 minRatio,
         uint256 maxRatio
     ) internal {
-        _require(minRatio == 0 || minRatio >= _MIN_CIRCUIT_BREAKER_RATIO, Errors.MIN_CIRCUIT_BREAKER_RATIO);
+        // Has to be > minRatio (if equal, encoded value would be 0, indistinguishable from no circuit breaker)
+        _require(minRatio == 0 || minRatio > _MIN_CIRCUIT_BREAKER_RATIO, Errors.MIN_CIRCUIT_BREAKER_RATIO);
         _require(maxRatio == 0 || maxRatio <= _MAX_CIRCUIT_BREAKER_RATIO, Errors.MAX_CIRCUIT_BREAKER_RATIO);
         _require(maxRatio >= minRatio, Errors.INVALID_CIRCUIT_BREAKER_RATIOS);
 
