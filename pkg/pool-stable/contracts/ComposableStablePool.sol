@@ -251,7 +251,8 @@ contract ComposableStablePool is
                 request.amount,
                 registeredBalances,
                 registeredIndexIn,
-                registeredIndexOut
+                registeredIndexOut,
+                0
             );
     }
 
@@ -272,7 +273,8 @@ contract ComposableStablePool is
                 request.amount,
                 registeredBalances,
                 registeredIndexIn,
-                registeredIndexOut
+                registeredIndexOut,
+                0
             );
     }
 
@@ -285,21 +287,17 @@ contract ComposableStablePool is
         uint256 amountGiven,
         uint256[] memory registeredBalances,
         uint256 registeredIndexIn,
-        uint256 registeredIndexOut
-    ) private view returns (uint256) {
+        uint256 registeredIndexOut,
+        uint256 currentAmp
+    ) public view returns (uint256) {
         // Adjust indices and balances for BPT token
         uint256[] memory balances = _dropBptItem(registeredBalances);
         uint256 indexIn = _skipBptIndex(registeredIndexIn);
         uint256 indexOut = _skipBptIndex(registeredIndexOut);
 
-        (uint256 currentAmp, ) = _getAmplificationParameter();
         uint256 invariant = StableMath._calculateInvariant(currentAmp, balances);
 
-        if (isGivenIn) {
-            return StableMath._calcOutGivenIn(currentAmp, balances, indexIn, indexOut, amountGiven, invariant);
-        } else {
-            return StableMath._calcInGivenOut(currentAmp, balances, indexIn, indexOut, amountGiven, invariant);
-        }
+        return StableMath._calcOutGivenIn(currentAmp, balances, indexIn, indexOut, amountGiven, invariant);
     }
 
     /**
@@ -413,7 +411,7 @@ contract ComposableStablePool is
         uint256 currentAmp,
         uint256 actualSupply,
         uint256 preJoinExitInvariant
-    ) internal view returns (uint256, uint256) {
+    ) public view returns (uint256, uint256) {
         // The StableMath function was created with joins in mind, so it expects a full amounts array. We create an
         // empty one and only set the amount for the token involved.
         uint256[] memory amountsIn = new uint256[](balances.length);
@@ -508,7 +506,7 @@ contract ComposableStablePool is
         uint256 currentAmp,
         uint256 actualSupply,
         uint256 preJoinExitInvariant
-    ) internal view returns (uint256, uint256) {
+    ) public view returns (uint256, uint256) {
         uint256 amountOut = StableMath._calcTokenOutGivenExactBptIn(
             currentAmp,
             balances,
