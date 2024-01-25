@@ -67,8 +67,6 @@ contract ComposableStablePool is
     // We are preminting half of that value (rounded up).
     uint256 private constant _PREMINTED_TOKEN_BALANCE = 2**(111);
 
-    string private _version;
-
     // The constructor arguments are received in a struct to work around stack-too-deep issues
     struct NewPoolParams {
         IVault vault;
@@ -107,9 +105,7 @@ contract ComposableStablePool is
             params.protocolFeeProvider,
             ProviderFeeIDs({ swap: ProtocolFeeType.SWAP, yield: ProtocolFeeType.YIELD, aum: ProtocolFeeType.AUM })
         )
-    {
-        _version = params.version;
-    }
+    {}
 
     // Translate parameters to avoid stack-too-deep issues in the constructor
     function _extractRatesParams(NewPoolParams memory params)
@@ -140,18 +136,7 @@ contract ComposableStablePool is
     }
 
     function version() external view override returns (string memory) {
-        return _version;
-    }
-
-    /**
-     * @notice Return the minimum BPT balance, required to avoid minimum token balances.
-     * @dev This amount is minted and immediately burned on pool initialization, so that the total supply
-     * (and therefore post-exit token balances), can never be zero. This keeps the math well-behaved when
-     * liquidity is low. (It also provides an easy way to check whether a pool has been initialized, to
-     * ensure this is only done once.)
-     */
-    function getMinimumBpt() external pure returns (uint256) {
-        return _getMinimumBpt();
+        return "0";
     }
 
     // BasePool hook
@@ -191,16 +176,7 @@ contract ComposableStablePool is
         uint256 registeredIndexOut,
         uint256[] memory scalingFactors
     ) internal virtual override returns (uint256) {
-        return
-            (swapRequest.tokenIn == IERC20(this) || swapRequest.tokenOut == IERC20(this))
-                ? _swapWithBpt(swapRequest, registeredBalances, registeredIndexIn, registeredIndexOut, scalingFactors)
-                : super._swapGivenIn(
-                    swapRequest,
-                    registeredBalances,
-                    registeredIndexIn,
-                    registeredIndexOut,
-                    scalingFactors
-                );
+        return 0;
     }
 
     /**
@@ -222,16 +198,7 @@ contract ComposableStablePool is
         uint256 registeredIndexOut,
         uint256[] memory scalingFactors
     ) internal virtual override returns (uint256) {
-        return
-            (swapRequest.tokenIn == IERC20(this) || swapRequest.tokenOut == IERC20(this))
-                ? _swapWithBpt(swapRequest, registeredBalances, registeredIndexIn, registeredIndexOut, scalingFactors)
-                : super._swapGivenOut(
-                    swapRequest,
-                    registeredBalances,
-                    registeredIndexIn,
-                    registeredIndexOut,
-                    scalingFactors
-                );
+        return 0;
     }
 
     /**
@@ -245,15 +212,7 @@ contract ComposableStablePool is
         uint256 registeredIndexIn,
         uint256 registeredIndexOut
     ) internal virtual override returns (uint256) {
-        return
-            _onRegularSwap(
-                true, // given in
-                request.amount,
-                registeredBalances,
-                registeredIndexIn,
-                registeredIndexOut,
-                0
-            );
+        return 0;
     }
 
     /**
@@ -267,15 +226,7 @@ contract ComposableStablePool is
         uint256 registeredIndexIn,
         uint256 registeredIndexOut
     ) internal virtual override returns (uint256) {
-        return
-            _onRegularSwap(
-                false, // given out
-                request.amount,
-                registeredBalances,
-                registeredIndexIn,
-                registeredIndexOut,
-                0
-            );
+        return 0;
     }
 
     /**
@@ -316,54 +267,7 @@ contract ComposableStablePool is
         uint256 registeredIndexOut,
         uint256[] memory scalingFactors
     ) private returns (uint256) {
-        bool isGivenIn = swapRequest.kind == IVault.SwapKind.GIVEN_IN;
-
-        _upscaleArray(registeredBalances, scalingFactors);
-        swapRequest.amount = _upscale(
-            swapRequest.amount,
-            scalingFactors[isGivenIn ? registeredIndexIn : registeredIndexOut]
-        );
-
-        (
-            uint256 preJoinExitSupply,
-            uint256[] memory balances,
-            uint256 currentAmp,
-            uint256 preJoinExitInvariant
-        ) = _beforeJoinExit(registeredBalances);
-
-        // These calls mutate `balances` so that it holds the post join-exit balances.
-        (uint256 amountCalculated, uint256 postJoinExitSupply) = registeredIndexOut == getBptIndex()
-            ? _doJoinSwap(
-                isGivenIn,
-                swapRequest.amount,
-                balances,
-                _skipBptIndex(registeredIndexIn),
-                currentAmp,
-                preJoinExitSupply,
-                preJoinExitInvariant
-            )
-            : _doExitSwap(
-                isGivenIn,
-                swapRequest.amount,
-                balances,
-                _skipBptIndex(registeredIndexOut),
-                currentAmp,
-                preJoinExitSupply,
-                preJoinExitInvariant
-            );
-
-        _updateInvariantAfterJoinExit(
-            currentAmp,
-            balances,
-            preJoinExitInvariant,
-            preJoinExitSupply,
-            postJoinExitSupply
-        );
-
-        return
-            isGivenIn
-                ? _downscaleDown(amountCalculated, scalingFactors[registeredIndexOut]) // Amount out, round down
-                : _downscaleUp(amountCalculated, scalingFactors[registeredIndexIn]); // Amount in, round up
+      return 0;
     }
 
     /**
@@ -379,24 +283,7 @@ contract ComposableStablePool is
         uint256 actualSupply,
         uint256 preJoinExitInvariant
     ) internal view returns (uint256, uint256) {
-        return
-            isGivenIn
-                ? _joinSwapExactTokenInForBptOut(
-                    amount,
-                    balances,
-                    indexIn,
-                    currentAmp,
-                    actualSupply,
-                    preJoinExitInvariant
-                )
-                : _joinSwapExactBptOutForTokenIn(
-                    amount,
-                    balances,
-                    indexIn,
-                    currentAmp,
-                    actualSupply,
-                    preJoinExitInvariant
-                );
+        return (0,0);
     }
 
     /**
@@ -445,20 +332,7 @@ contract ComposableStablePool is
         uint256 actualSupply,
         uint256 preJoinExitInvariant
     ) internal view returns (uint256, uint256) {
-        uint256 amountIn = StableMath._calcTokenInGivenExactBptOut(
-            currentAmp,
-            balances,
-            indexIn,
-            bptOut,
-            actualSupply,
-            preJoinExitInvariant,
-            getSwapFeePercentage()
-        );
-
-        balances[indexIn] = balances[indexIn].add(amountIn);
-        uint256 postJoinExitSupply = actualSupply.add(bptOut);
-
-        return (amountIn, postJoinExitSupply);
+        return (0, 0);
     }
 
     /**
@@ -474,24 +348,7 @@ contract ComposableStablePool is
         uint256 actualSupply,
         uint256 preJoinExitInvariant
     ) internal view returns (uint256, uint256) {
-        return
-            isGivenIn
-                ? _exitSwapExactBptInForTokenOut(
-                    amount,
-                    balances,
-                    indexOut,
-                    currentAmp,
-                    actualSupply,
-                    preJoinExitInvariant
-                )
-                : _exitSwapExactTokenOutForBptIn(
-                    amount,
-                    balances,
-                    indexOut,
-                    currentAmp,
-                    actualSupply,
-                    preJoinExitInvariant
-                );
+        return (0,0);
     }
 
     /**
@@ -536,24 +393,7 @@ contract ComposableStablePool is
         uint256 actualSupply,
         uint256 preJoinExitInvariant
     ) internal view returns (uint256, uint256) {
-        // The StableMath function was created with exits in mind, so it expects a full amounts array. We create an
-        // empty one and only set the amount for the token involved.
-        uint256[] memory amountsOut = new uint256[](balances.length);
-        amountsOut[indexOut] = amountOut;
-
-        uint256 bptAmount = StableMath._calcBptInGivenExactTokensOut(
-            currentAmp,
-            balances,
-            amountsOut,
-            actualSupply,
-            preJoinExitInvariant,
-            getSwapFeePercentage()
-        );
-
-        balances[indexOut] = balances[indexOut].sub(amountOut);
-        uint256 postJoinExitSupply = actualSupply.sub(bptAmount);
-
-        return (bptAmount, postJoinExitSupply);
+        return (0, 0);
     }
 
     // Join Hooks
