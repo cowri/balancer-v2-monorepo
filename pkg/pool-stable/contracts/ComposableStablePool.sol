@@ -309,7 +309,7 @@ contract ComposableStablePool is
             balances,
             amountsIn,
             actualSupply,
-            preJoinExitInvariant,
+            StableMath._calculateInvariant(currentAmp, balances),
             getSwapFeePercentage()
         );
 
@@ -370,7 +370,7 @@ contract ComposableStablePool is
             indexOut,
             bptAmount,
             actualSupply,
-            preJoinExitInvariant,
+            StableMath._calculateInvariant(currentAmp, balances),
             getSwapFeePercentage()
         );
 
